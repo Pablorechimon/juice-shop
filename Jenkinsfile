@@ -14,6 +14,8 @@ pipeline {
         DOCKER_IMAGE = "ghcr.io/pablorechimon/juice-shop"
         TOOLS_IMAGE = "ghcr.io/pablorechimon/dso-tools"
         SONAR_KEY = "juice-shop"
+        JENKINS_UID = 1001 // User ID under which Jenkins runs
+        JENKINS_GID = 900 // Group ID under which Jenkins runs
     }
 
     agent any
