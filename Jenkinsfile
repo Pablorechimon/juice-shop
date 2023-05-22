@@ -11,10 +11,8 @@
 
 pipeline {
     environment { // Environment variables defined for all steps
-        DOCKER_IMAGE = "registry.demo.local:5000/juice-shop"
-        TOOLS_IMAGE = "registry.demo.local:5000/tools-image"
-        JENKINS_UID = 1001 // User ID under which Jenkins runs
-        JENKINS_GID = 900 // Group ID under which Jenkins runs
+        DOCKER_IMAGE = "ghcr.io/pablorechimon/juice-shop"
+        TOOLS_IMAGE = "ghcr.io/pablorechimon/dso-tools"
         SONAR_KEY = "juice-shop"
     }
 
@@ -65,30 +63,30 @@ pipeline {
             }
         }
 
-        stage("sonarscanner") {
-            agent {
-                docker {
-                    image "${TOOLS_IMAGE}"
-                    // Make sure that username can be mapped correctly
-                    args "--volume /etc/passwd:/etc/passwd:ro --network lab"
-                    reuseNode true
-                }
-            }
-            steps {
-                withSonarQubeEnv("sonarqube.demo.local") {
-                    sh label: "install prerequisites",
-                        script: "npm install -D typescript"
-                    sh label: "sonar-scanner",
-                        script: """\
-                            sonar-scanner \
-                            '-Dsonar.buildString=${BRANCH_NAME}-${BUILD_ID}' \
-                            '-Dsonar.projectKey=${SONAR_KEY}' \
-                            '-Dsonar.projectVersion=${BUILD_ID}' \
-                            '-Dsonar.sources=${WORKSPACE}'
-                        """
-                }
-            }
-        }
+        // stage("sonarscanner") {
+        //     agent {
+        //         docker {
+        //             image "${TOOLS_IMAGE}"
+        //             // Make sure that username can be mapped correctly
+        //             args "--volume /etc/passwd:/etc/passwd:ro --network lab"
+        //             reuseNode true
+        //         }
+        //     }
+        //     steps {
+        //         withSonarQubeEnv("sonarqube.demo.local") {
+        //             sh label: "install prerequisites",
+        //                 script: "npm install -D typescript"
+        //             sh label: "sonar-scanner",
+        //                 script: """\
+        //                     sonar-scanner \
+        //                     '-Dsonar.buildString=${BRANCH_NAME}-${BUILD_ID}' \
+        //                     '-Dsonar.projectKey=${SONAR_KEY}' \
+        //                     '-Dsonar.projectVersion=${BUILD_ID}' \
+        //                     '-Dsonar.sources=${WORKSPACE}'
+        //                 """
+        //         }
+        //     }
+        // }
 
         stage("Dependency-Check") {
             agent {
@@ -153,122 +151,122 @@ pipeline {
             }
         }
 
-        stage("Launch sidecar") {
-            steps {
-                sh label: "Start sidecar container",
-                    script: """\
-                        docker run --detach \
-                                   --network lab \
-                                   --name ${JOB_BASE_NAME}-${BUILD_ID} \
-                                   --rm \
-                                   ${DOCKER_IMAGE}:${tag}
-                    """
-            }
-        }
+    //     stage("Launch sidecar") {
+    //         steps {
+    //             sh label: "Start sidecar container",
+    //                 script: """\
+    //                     docker run --detach \
+    //                                --network lab \
+    //                                --name ${JOB_BASE_NAME}-${BUILD_ID} \
+    //                                --rm \
+    //                                ${DOCKER_IMAGE}:${tag}
+    //                 """
+    //         }
+    //     }
 
-        stage("Scan container") {
-            agent {
-                docker {
-                    image "$TOOLS_IMAGE"
-                    // Make sure that the container can access anchore-engine_api_1
-                    args "--network=lab"
-                    reuseNode true
-                }
-            }
-            steps {
-                // Continue the build, even after policy failure
-                script {
-                    sh label: "Ensure anchore is available",
-                        script: "anchore-cli system status"
-                    sh label: "Add to queue",
-                        script: "anchore-cli image add ${DOCKER_IMAGE}:$tag"
-                    sh label: "Wait for analysis",
-                        script: "anchore-cli image wait ${DOCKER_IMAGE}:$tag"
-                    sh label: "Generate list of vulnerabilities",
-                        script: "anchore-cli image vuln $DOCKER_IMAGE:$tag all | tee anchore-results.txt"
-                    def result = sh label: "Check policy",
-                        script: "anchore-cli evaluate check ${DOCKER_IMAGE}:$tag --detail >> anchore-results.txt"
-                    if (result > 0) {
-                        unstable(message: "Policy check failed")
-                    }
-                }
-            }
-        }
+    //     stage("Scan container") {
+    //         agent {
+    //             docker {
+    //                 image "$TOOLS_IMAGE"
+    //                 // Make sure that the container can access anchore-engine_api_1
+    //                 args "--network=lab"
+    //                 reuseNode true
+    //             }
+    //         }
+    //         steps {
+    //             // Continue the build, even after policy failure
+    //             script {
+    //                 sh label: "Ensure anchore is available",
+    //                     script: "anchore-cli system status"
+    //                 sh label: "Add to queue",
+    //                     script: "anchore-cli image add ${DOCKER_IMAGE}:$tag"
+    //                 sh label: "Wait for analysis",
+    //                     script: "anchore-cli image wait ${DOCKER_IMAGE}:$tag"
+    //                 sh label: "Generate list of vulnerabilities",
+    //                     script: "anchore-cli image vuln $DOCKER_IMAGE:$tag all | tee anchore-results.txt"
+    //                 def result = sh label: "Check policy",
+    //                     script: "anchore-cli evaluate check ${DOCKER_IMAGE}:$tag --detail >> anchore-results.txt"
+    //                 if (result > 0) {
+    //                     unstable(message: "Policy check failed")
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        stage("nikto") {
-            agent {
-                docker {
-                    image "$TOOLS_IMAGE"
-                    // Make sure that the container can access the sidecar
-                    args "--network=lab"
-                    reuseNode true
-                }
-            }
-            steps {
-                script {
-                    // Fail stage when Nikto finds something
-                    def result = sh label: "nikto", returnStatus: true,
-                        script: """\
-                            mkdir -p reports &>/dev/null
-                            curl --max-time 120 \
-                                --retry 60 \
-                                --retry-connrefused \
-                                --retry-delay 5 \
-                                --fail \
-                                --silent http://${JOB_BASE_NAME}-${BUILD_ID}:3000 || exit 1
-                            rm reports/nikto.html &> /dev/null
-                            nikto.pl -ask no \
-                                -nointeractive \
-                                -output reports/nikto.html \
-                                -Plugins '@@ALL;-sitefiles' \
-                                -Tuning x7 \
-                                -host http://${JOB_BASE_NAME}-${BUILD_ID}:3000 > nikto.pl-results.txt
-                        """
-                    if (result > 0) {
-                        unstable(message: "Web server scanner issues found")
-                    }
-                }
-            }
-        }
+    //     stage("nikto") {
+    //         agent {
+    //             docker {
+    //                 image "$TOOLS_IMAGE"
+    //                 // Make sure that the container can access the sidecar
+    //                 args "--network=lab"
+    //                 reuseNode true
+    //             }
+    //         }
+    //         steps {
+    //             script {
+    //                 // Fail stage when Nikto finds something
+    //                 def result = sh label: "nikto", returnStatus: true,
+    //                     script: """\
+    //                         mkdir -p reports &>/dev/null
+    //                         curl --max-time 120 \
+    //                             --retry 60 \
+    //                             --retry-connrefused \
+    //                             --retry-delay 5 \
+    //                             --fail \
+    //                             --silent http://${JOB_BASE_NAME}-${BUILD_ID}:3000 || exit 1
+    //                         rm reports/nikto.html &> /dev/null
+    //                         nikto.pl -ask no \
+    //                             -nointeractive \
+    //                             -output reports/nikto.html \
+    //                             -Plugins '@@ALL;-sitefiles' \
+    //                             -Tuning x7 \
+    //                             -host http://${JOB_BASE_NAME}-${BUILD_ID}:3000 > nikto.pl-results.txt
+    //                     """
+    //                 if (result > 0) {
+    //                     unstable(message: "Web server scanner issues found")
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        stage("OWASP ZAP") {
-            agent {
-                docker {
-                    image "owasp/zap2docker-weekly"
-                    // Make sure that the container can access the sidecar
-                    args "--network=lab --tty --volume ${WORKSPACE}:/zap/wrk"
-                    reuseNode true
-                }
-            }
-            steps {
-                script {
-                    def result = sh label: "OWASP ZAP", returnStatus: true,
-                        script: """\
-                            mkdir -p reports &>/dev/null
-                            curl --max-time 120 \
-                                --retry 60 \
-                                --retry-connrefused \
-                                --retry-delay 5 \
-                                --fail \
-                                --silent http://${JOB_BASE_NAME}-${BUILD_ID}:3000 || exit 1
-                            zap-baseline.py \
-                            -m 5 \
-                            -T 5\
-                            -I \
-                            -r reports/zapreport.html \
-                            -t "http://${JOB_BASE_NAME}-${BUILD_ID}:3000"
-                    """
-                    if (result > 0) {
-                        unstable(message: "OWASP ZAP issues found")
-                    }
-                }
-            }
-        }
+    //     stage("OWASP ZAP") {
+    //         agent {
+    //             docker {
+    //                 image "owasp/zap2docker-weekly"
+    //                 // Make sure that the container can access the sidecar
+    //                 args "--network=lab --tty --volume ${WORKSPACE}:/zap/wrk"
+    //                 reuseNode true
+    //             }
+    //         }
+    //         steps {
+    //             script {
+    //                 def result = sh label: "OWASP ZAP", returnStatus: true,
+    //                     script: """\
+    //                         mkdir -p reports &>/dev/null
+    //                         curl --max-time 120 \
+    //                             --retry 60 \
+    //                             --retry-connrefused \
+    //                             --retry-delay 5 \
+    //                             --fail \
+    //                             --silent http://${JOB_BASE_NAME}-${BUILD_ID}:3000 || exit 1
+    //                         zap-baseline.py \
+    //                         -m 5 \
+    //                         -T 5\
+    //                         -I \
+    //                         -r reports/zapreport.html \
+    //                         -t "http://${JOB_BASE_NAME}-${BUILD_ID}:3000"
+    //                 """
+    //                 if (result > 0) {
+    //                     unstable(message: "OWASP ZAP issues found")
+    //                 }
+    //             }
+    //         }
+    //     }
     }
 
     post {
         always {
-            sh label: "Stop sidecar container", script: "docker stop ${JOB_BASE_NAME}-${BUILD_ID}"
+            // sh label: "Stop sidecar container", script: "docker stop ${JOB_BASE_NAME}-${BUILD_ID}"
             archiveArtifacts artifacts: "*-results.txt"
             publishHTML([
                 allowMissing: true,
@@ -278,22 +276,22 @@ pipeline {
                 reportFiles: "dependency-check-report.html",
                 reportName: "Dependency Check Report"
             ])
-            publishHTML([
-                allowMissing: true,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: "reports",
-                reportFiles: "nikto.html",
-                reportName: "Nikto.pl scanreport"
-            ])
-            publishHTML([
-                allowMissing: true,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: "reports",
-                reportFiles: "zapreport.html",
-                reportName: "OWASP ZAP scanreport"
-            ])
+            // publishHTML([
+            //     allowMissing: true,
+            //     alwaysLinkToLastBuild: true,
+            //     keepAll: true,
+            //     reportDir: "reports",
+            //     reportFiles: "nikto.html",
+            //     reportName: "Nikto.pl scanreport"
+            // ])
+            // publishHTML([
+            //     allowMissing: true,
+            //     alwaysLinkToLastBuild: true,
+            //     keepAll: true,
+            //     reportDir: "reports",
+            //     reportFiles: "zapreport.html",
+            //     reportName: "OWASP ZAP scanreport"
+            // ])
         }
     }
 }
