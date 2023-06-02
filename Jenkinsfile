@@ -48,6 +48,7 @@ pipeline {
                 script {
                     def result = sh label: "detect-secrets",
                         script: """\
+                            detect-secrets scan > .secrets.baseline.json
                             detect-secrets-hook --no-verify \
                                                 -v \
                                                 --baseline .secrets.baseline.json \
