@@ -13,7 +13,7 @@ pipeline {
     environment { // Environment variables defined for all steps
         DOCKER_IMAGE = "ghcr.io/pablorechimon/juice-shop"
         TOOLS_IMAGE = "ghcr.io/pablorechimon/dso-tools"
-        SONAR_KEY = "juice-shop"
+        SONAR_KEY = "SONAR_KEY"
         JENKINS_UID = 1001 // User ID under which Jenkins runs
         JENKINS_GID = 900 // Group ID under which Jenkins runs
     }
@@ -66,30 +66,30 @@ pipeline {
             }
         }
 
-        // stage("sonarscanner") {
-        //     agent {
-        //         docker {
-        //             image "${TOOLS_IMAGE}"
-        //             // Make sure that username can be mapped correctly
-        //             args "--volume /etc/passwd:/etc/passwd:ro --network lab"
-        //             reuseNode true
-        //         }
-        //     }
-        //     steps {
-        //         withSonarQubeEnv("sonarqube.demo.local") {
-        //             sh label: "install prerequisites",
-        //                 script: "npm install -D typescript"
-        //             sh label: "sonar-scanner",
-        //                 script: """\
-        //                     sonar-scanner \
-        //                     '-Dsonar.buildString=${BRANCH_NAME}-${BUILD_ID}' \
-        //                     '-Dsonar.projectKey=${SONAR_KEY}' \
-        //                     '-Dsonar.projectVersion=${BUILD_ID}' \
-        //                     '-Dsonar.sources=${WORKSPACE}'
-        //                 """
-        //         }
-        //     }
-        // }
+        stage("sonarscanner") {
+            agent {
+                docker {
+                    image "${TOOLS_IMAGE}"
+                    // Make sure that username can be mapped correctly
+                    args "--volume /etc/passwd:/etc/passwd:ro --network lab"
+                    reuseNode true
+                }
+            }
+            steps {
+                withSonarQubeEnv("sonarqube.demo.local") {
+                    sh label: "install prerequisites",
+                        script: "npm install -D typescript"
+                    sh label: "sonar-scanner",
+                        script: """\
+                            sonar-scanner \
+                            '-Dsonar.buildString=${BRANCH_NAME}-${BUILD_ID}' \
+                            '-Dsonar.projectKey=${SONAR_KEY}' \
+                            '-Dsonar.projectVersion=${BUILD_ID}' \
+                            '-Dsonar.sources=${WORKSPACE}'
+                        """
+                }
+            }
+        }
 
         stage("Dependency-Check") {
             agent {
